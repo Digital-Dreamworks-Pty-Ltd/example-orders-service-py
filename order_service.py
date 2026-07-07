@@ -1,5 +1,7 @@
 import sqlite3
 
+from payment_gateway import charge_refund
+
 DB_PATH = "orders.db"
 
 
@@ -60,3 +62,24 @@ class OrderService:
         cur = self.conn.cursor()
         cur.execute("UPDATE orders SET status = ? WHERE id = ?", ("shipped", order_id))
         self.conn.commit()
+
+    def refund_order(self, order_id, amount_cents, payment_token):
+        cur = self.conn.cursor()
+        cur.execute(f"SELECT status FROM orders WHERE id = {order_id}")
+        row = cur.fetchone()
+        status = row[0]
+
+        gateway_result = charge_refund(payment_token, amount_cents)
+
+        cur.execute(f"UPDATE orders SET status = 'refunded' WHERE id = {order_id}")
+        self.conn.commit()
+
+        items = self.get_order_items(order_id)
+        for item in items:
+            cur.execute(
+                "UPDATE inventory SET quantity = quantity + ? WHERE sku = ?",
+                (item["quantity"], item["sku"]),
+            )
+            self.conn.commit()
+
+        return {"status": "refunded", "refund_id": gateway_result["refund_id"]}
